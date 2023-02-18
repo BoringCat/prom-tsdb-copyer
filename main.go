@@ -1,8 +1,10 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"os"
+	"path"
 	"runtime"
 	"strings"
 	"sync"
@@ -10,6 +12,7 @@ import (
 
 	"github.com/prometheus/prometheus/model/labels"
 	"github.com/prometheus/prometheus/tsdb"
+	"github.com/prometheus/prometheus/tsdb/chunkenc"
 	"gopkg.in/alecthomas/kingpin.v2"
 )
 
@@ -64,9 +67,6 @@ func parseArgs() {
 
 	if multiThread == 0 {
 		multiThread = runtime.GOMAXPROCS(0)
-	}
-	if queryTimeSplit > time.Hour {
-		queryTimeSplit = time.Hour
 	}
 	timeSplit = int64(queryTimeSplit / time.Millisecond)
 	blockSplit = int64(blockTimeSplit / time.Millisecond)
@@ -126,13 +126,101 @@ func int64Max(s1, s2 int64) int64 {
 	return s2
 }
 
+type copyDB struct {
+	sync      sync.Mutex
+	taskCount int
+	*tsdb.DB
+	mint, maxt        int64
+	tmpdir, targetDir string
+}
+
+func (c *copyDB) Fin() {
+	c.sync.Lock()
+	defer c.sync.Unlock()
+	c.taskCount--
+	if c.taskCount > 0 {
+		return
+	}
+	fmt.Println(
+		time.UnixMilli(c.mint).Format(time.RFC3339Nano),
+		"到", time.UnixMilli(c.maxt).Format(time.RFC3339Nano),
+		"的任务完成，开始生成快照")
+	noErr(c.DB.CompactOOOHead())
+	noErr(c.DB.Compact())
+	stmpdir, err := os.MkdirTemp(c.targetDir, fmt.Sprint("tsdb-snapshot-tmp-", c.mint))
+	noErr(err)
+	noErr(c.DB.Snapshot(stmpdir, true))
+	noErr(compact(stmpdir))
+	noErr(os.RemoveAll(stmpdir))
+	noErr(c.DB.Close())
+	noErr(os.RemoveAll(c.tmpdir))
+}
+
+func (c *copyDB) Add() {
+	c.sync.Lock()
+	defer c.sync.Unlock()
+	c.taskCount++
+}
+
+func makeNewDB(mint, maxt int64, targetDir string) *copyDB {
+	tmpdir, err := os.MkdirTemp(targetDir, fmt.Sprint("tsdb-copy-tmp-", mint))
+	noErr(err)
+	opt := tsdb.DefaultOptions()
+	opt.WALCompression = true
+	opt.MaxBlockDuration = blockSplit
+	opt.OutOfOrderTimeWindow = blockSplit
+	db, err := tsdb.Open(tmpdir, nil, nil, opt, nil)
+	noErr(err)
+	db.DisableCompactions()
+	return &copyDB{
+		DB:        db,
+		mint:      mint,
+		maxt:      maxt,
+		tmpdir:    tmpdir,
+		targetDir: targetDir,
+	}
+}
+
+func compact(snapshotDir string) error {
+	dirs := []string{}
+	rdirs, err := os.ReadDir(snapshotDir)
+	if err != nil {
+		return err
+	}
+	for _, d := range rdirs {
+		dirs = append(dirs, path.Join(snapshotDir, d.Name()))
+	}
+	compacter, err := tsdb.NewLeveledCompactor(
+		context.Background(), nil, nil,
+		tsdb.ExponentialBlockRanges(tsdb.DefaultBlockDuration, 3, 5),
+		chunkenc.NewPool(), nil,
+	)
+	if err != nil {
+		return err
+	}
+	uid, err := compacter.Compact(targetDir, dirs, nil)
+	if err != nil {
+		return err
+	}
+	fmt.Println("数据压缩完成, 生成块", uid)
+	for _, d := range dirs {
+		if err := os.RemoveAll(d); err != nil {
+			return err
+		}
+		fmt.Println("数据压缩完成, 删除块", path.Base(d))
+	}
+	return nil
+}
+
 type copyer interface {
 	copyPerTime(opt *copyOpt) (count uint64, err error)
 	multiThreadCopyer(wg *sync.WaitGroup, req <-chan *copyOpt, resp chan<- *copyResp)
 	getDbTimes() (mint int64, maxt int64, err error)
+	clean() error
 }
 
 type copyOpt struct {
+	db         *copyDB
 	mint, maxt int64
 }
 
@@ -165,7 +253,13 @@ func multiThreadMain(cp copyer) uint64 {
 	}()
 	for mint := qmint; mint < qmaxt; mint += blockSplit {
 		maxt := int64Min(mint+blockSplit, qmaxt)
-		req <- &copyOpt{mint, maxt}
+		db := makeNewDB(mint, maxt, targetDir)
+		for startTimeMs := mint; startTimeMs < maxt; startTimeMs += timeSplit {
+			endTimeMs := int64Min(maxt, startTimeMs+timeSplit)
+			fmt.Println("发布拷贝", time.UnixMilli(startTimeMs).Format(time.RFC3339Nano), "到", time.UnixMilli(endTimeMs).Format(time.RFC3339Nano), "数据的任务")
+			db.Add()
+			req <- &copyOpt{db, startTimeMs, endTimeMs}
+		}
 	}
 	close(req)
 	workgroup.Wait()
@@ -181,10 +275,24 @@ func singleMain(cp copyer) uint64 {
 	qmint := int64Max(dbmint, startTime)
 	qmaxt := int64Min(dbmaxt, endTime)
 	for mint := qmint; mint < qmaxt; mint += blockSplit {
+		var splitCount uint64 = 0
 		maxt := int64Min(mint+blockSplit, qmaxt)
-		c, err := cp.copyPerTime(&copyOpt{mint, maxt})
-		noErr(err)
-		copyCount += c
+		db := makeNewDB(mint, maxt, targetDir)
+		mintStr := time.UnixMilli(mint).Format(time.RFC3339Nano)
+		maxtStr := time.UnixMilli(maxt).Format(time.RFC3339Nano)
+		fmt.Println("开始从", originDir, "拷贝", mintStr, "到", maxtStr, "的数据到", targetDir)
+		for startTimeMs := mint; startTimeMs < maxt; startTimeMs += timeSplit {
+			endTimeMs := int64Min(maxt, startTimeMs+timeSplit)
+			c, err := cp.copyPerTime(&copyOpt{db, startTimeMs, endTimeMs})
+			noErr(err)
+			splitCount += c
+		}
+		if splitCount == 0 {
+			fmt.Println(mintStr, "到", maxtStr, "共查询到", splitCount, "条数据")
+			continue
+		}
+		copyCount += splitCount
+		db.Fin()
 	}
 	return copyCount
 }
@@ -212,7 +320,7 @@ func main() {
 	if strings.HasPrefix(originDir, "http://") || strings.HasPrefix(originDir, "https://") {
 		cp = MustNewRemoteCopyer(originDir, targetDir)
 	} else {
-		cp = &localCopyer{originDir, targetDir}
+		cp = MustNewLocalCopyer(originDir)
 	}
 	if multiThread > 0 {
 		copyCount = multiThreadMain(cp)

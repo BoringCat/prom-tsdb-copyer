@@ -53,12 +53,8 @@ make
 ```
 
 ## 注意事项
-- 单次查询的最大时间区间为 **1小时** 这个结果是经过大量测试总结的，超过这个时间会导致一堆奇奇怪怪的问题  
-  最常见的就是 `panic: out of bounds`。这个和源 TSDB 块的间隔有关，如果你的查询同时匹配到两个块，可能会导致返回了乱序的时序（即使 Querier.Select 传入了 sortSeries = true）  
-  ~~（但你看[源码][4]这个选项是没有开的，本来数据就是顺序的）~~
-- 1小时的单次查询区间性能是最高的，因为写入每个区间的每个序列都会进行一次commit以减少内存使用量  
-  （否则再多内存都不够用）
-- RemoteRead 读取远程数据时会对远程 Prometheus 产生大量负载，并发时需要注意远程内存消耗
+- 默认开启 `Out Of Order` 写入支持，并使用 `Compactor` 对 `OOO` 写入的数据进行打包
+- `RemoteRead` 读取远程数据时会对远程 `Prometheus` 产生大量负载，并发时需要注意远程内存消耗
 
 [1]: https://github.com/grafana/mimir
 [2]: https://github.com/thanos-io/thanos
