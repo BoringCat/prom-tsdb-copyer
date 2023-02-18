@@ -39,6 +39,11 @@ func (c *remoteCopyer) copyPerTime(opt *copyOpt) (count uint64, err error) {
 	if err != nil {
 		return
 	}
+	defer func() {
+		if err = os.RemoveAll(tmpdir); err != nil {
+			return
+		}
+	}()
 	mintStr := time.UnixMilli(opt.mint).Format(time.RFC3339Nano)
 	maxtStr := time.UnixMilli(opt.maxt).Format(time.RFC3339Nano)
 	ndb, err := tsdb.Open(tmpdir, nil, nil, tsdb.DefaultOptions(), nil)
@@ -77,7 +82,6 @@ func (c *remoteCopyer) copyPerTime(opt *copyOpt) (count uint64, err error) {
 			writer := ndb.Appender(context.Background())
 			for _, sample := range series.GetSamples() {
 				splitCount++
-				// fmt.Println(lbs, sample.GetTimestamp(), sample.GetValue())
 				if ref, err = writer.Append(ref, lbs, sample.GetTimestamp(), sample.GetValue()); err != nil {
 					return
 				}
@@ -89,11 +93,12 @@ func (c *remoteCopyer) copyPerTime(opt *copyOpt) (count uint64, err error) {
 		fmt.Println(time.UnixMilli(startTimeMs).Format(time.RFC3339Nano), "到", time.UnixMilli(endTimeMs).Format(time.RFC3339Nano), "的数据完成，共", splitCount, "条")
 		count += splitCount
 	}
-	fmt.Println(mintStr, "到", maxtStr, "共查询到", count, "条数据，开始生成快照")
-	if err = ndb.Snapshot(c.targetDir, true); err != nil {
+	if count == 0 {
+		fmt.Println(mintStr, "到", maxtStr, "共查询到", count, "条数据")
 		return
 	}
-	if err = os.RemoveAll(tmpdir); err != nil {
+	fmt.Println(mintStr, "到", maxtStr, "共查询到", count, "条数据，开始生成快照")
+	if err = ndb.Snapshot(c.targetDir, true); err != nil {
 		return
 	}
 	return

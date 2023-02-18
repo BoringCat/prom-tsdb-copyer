@@ -22,6 +22,11 @@ func (c *localCopyer) copyPerTime(opt *copyOpt) (count uint64, err error) {
 	if err != nil {
 		return
 	}
+	defer func() {
+		if err = os.RemoveAll(tmpdir); err != nil {
+			return
+		}
+	}()
 	if _, err := os.Stat(path.Join(c.originDir, "wal")); os.IsNotExist(err) {
 		if err := os.Mkdir(path.Join(c.originDir, "wal"), 0x755); err != nil {
 			return 0, err
@@ -83,11 +88,12 @@ func (c *localCopyer) copyPerTime(opt *copyOpt) (count uint64, err error) {
 		count += splitCount
 		fmt.Println(time.UnixMilli(startTimeMs).Format(time.RFC3339Nano), "到", time.UnixMilli(endTimeMs).Format(time.RFC3339Nano), "的数据完成，共", splitCount, "条")
 	}
-	fmt.Println(mintStr, "到", maxtStr, "共查询到", count, "条数据，开始生成快照")
-	if err = ndb.Snapshot(c.targetDir, true); err != nil {
+	if count == 0 {
+		fmt.Println(mintStr, "到", maxtStr, "共查询到", count, "条数据")
 		return
 	}
-	if err = os.RemoveAll(tmpdir); err != nil {
+	fmt.Println(mintStr, "到", maxtStr, "共查询到", count, "条数据，开始生成快照")
+	if err = ndb.Snapshot(c.targetDir, true); err != nil {
 		return
 	}
 	return

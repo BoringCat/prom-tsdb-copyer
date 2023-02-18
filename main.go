@@ -88,10 +88,7 @@ func parseArgs() {
 
 func mustParseMatchKV(s string) (mt labels.MatchType, name string, val string) {
 	var sep string
-	if strings.Contains(s, "=") {
-		mt = labels.MatchEqual
-		sep = "="
-	} else if strings.Contains(s, "!=") {
+	if strings.Contains(s, "!=") {
 		mt = labels.MatchNotEqual
 		sep = "!="
 	} else if strings.Contains(s, "=~") {
@@ -100,6 +97,9 @@ func mustParseMatchKV(s string) (mt labels.MatchType, name string, val string) {
 	} else if strings.Contains(s, "!~") {
 		mt = labels.MatchNotRegexp
 		sep = "!~"
+	} else if strings.Contains(s, "=") {
+		mt = labels.MatchEqual
+		sep = "="
 	}
 	if len(sep) == 0 {
 		panic(fmt.Errorf("非法的label表达式: %s", s))
