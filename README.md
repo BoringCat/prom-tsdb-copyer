@@ -54,7 +54,14 @@ make
 
 ## 注意事项
 - 默认开启 `Out Of Order` 写入支持，并使用 `Compactor` 对 `OOO` 写入的数据进行打包
-- `RemoteRead` 读取远程数据时会对远程 `Prometheus` 产生大量负载，并发时需要注意远程内存消耗
+- `RemoteRead` 读取远程数据时会对远程 `Prometheus` 产生大量负载，并发时需要注意远程内存消耗  
+  大概会增加**1-2倍**的内存使用，
+
+## QA
+- Q: 为什么没有 RemoteWrite 支持  
+  A: 因为目的是实现完全兼容 Prometheus 的历史记录保存，如果得用 RemoveWrite 写到某个系统中再用其他PromQL兼容系统读的话太麻烦  
+    ~~加上本来就有 Thanos 环境，直接弹一个指向这些块的 Store 就完事了(也是为什么有加标签这个功能(去重.jpg))~~  
+    但不排除以后会支持，看有没有需求，或者 Prometheus + RemoveRead 的架构管理起来麻不麻烦
 
 [1]: https://github.com/grafana/mimir
 [2]: https://github.com/thanos-io/thanos
