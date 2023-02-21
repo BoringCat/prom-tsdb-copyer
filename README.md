@@ -13,17 +13,20 @@ usage: prom-tsdb-copyer --start-time=START-TIME --end-time=END-TIME [<flags>] <f
 普罗米修斯TSDB复制器
 
 Flags:
-      --help                   Show context-sensitive help (also try --help-long and --help-man).
+  -h, --help                   Show context-sensitive help (also try --help-long and --help-man).
   -S, --start-time=START-TIME  数据开始时间
   -E, --end-time=END-TIME      数据结束时间
-  -Q, --query-split=1h         切分新块的时长
+  -Q, --query-split=1h         切分查询的时长
   -B, --block-split=24h        切分新块的时长
       --verify                 是否验证数据量
+      --allow-out-of-order     是否允许乱序写入
+      --thanos-metadata        是否追加Thanos的元数据
   -T, --multi-thread=-1        并行多少个复制(0=GOMAXPROCS)
   -l, --label-query=LABEL-QUERY ...  
                                查询label（k=v）
   -L, --label-append=LABEL-APPEND ...  
                                增加label（k=v）
+  -V, --version                Show application version.
 
 Args:
   <from>   源TSDB文件夹/Remote Read 地址
@@ -41,7 +44,7 @@ prom-tsdb-copyer -S '2023-02-17 00:00:00' -E '2023-02-18 00:00:00' -l job=nodes 
 prom-tsdb-copyer -S '2023-02-17 00:00:00' -E '2023-02-18 00:00:00' -L create_from=copyer -L storage=persistent old_data/ new_data/
 # 并发拷贝（自动协程数量）
 prom-tsdb-copyer -S '2023-02-17 00:00:00' -E '2023-02-18 00:00:00' -T0 old_data/ new_data/
-# 按周分块
+# 按天分块
 prom-tsdb-copyer -S '2023-02-17 00:00:00' -E '2023-02-18 00:00:00' -B 168h old_data/ new_data/
 # 拷贝完以后通过meta.json验证指标数
 prom-tsdb-copyer -S '2023-02-17 00:00:00' -E '2023-02-18 00:00:00' --verify old_data/ new_data/
@@ -53,7 +56,8 @@ make
 ```
 
 ## 注意事项
-- 默认开启 `Out Of Order` 写入支持，并使用 `Compactor` 对 `OOO` 写入的数据进行打包
+- 不开启 `Out Of Order` 时，最大查询间隔为 `1h` ~~（你可以超，但TSDB也可以panic）~~
+- 默认调用 `Compactor` 对写入的数据进行打包，每个时间段生成一个块
 - `RemoteRead` 读取远程数据时会对远程 `Prometheus` 产生大量负载，并发时需要注意远程内存消耗  
   大概会增加**1-2倍**的内存使用，
 
@@ -66,4 +70,3 @@ make
 [1]: https://github.com/grafana/mimir
 [2]: https://github.com/thanos-io/thanos
 [3]: https://github.com/timescale/promscale/tree/master/migration-tool/cmd/prom-migrator
-[4]: local.go#L52

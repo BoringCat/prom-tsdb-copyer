@@ -37,41 +37,50 @@ func (c *localCopyer) copyPerTime(opt *copyOpt) (count uint64, err error) {
 	odb := c.dbPool.Get().(*tsdb.DBReadOnly)
 	defer c.dbPool.Put(odb)
 	var querier storage.Querier
-	if querier, err = odb.Querier(context.Background(), opt.mint, opt.maxt); err != nil {
-		return
-	}
-	selecter := querier.Select(false, nil, labelMatchers...)
-	for selecter.Next() {
-		series := selecter.At()
-		labels := series.Labels()
-		if len(labelAppends) > 0 {
-			labels = append(labels, labelAppends...)
+	ndb := makeNewDB(opt.mint, opt.maxt, args.targetDir)
+	for startTimeMs := opt.mint; startTimeMs < opt.maxt; startTimeMs += args.timeSplit {
+		endTimeMs := int64Min(opt.maxt, startTimeMs+args.timeSplit)
+		if querier, err = odb.Querier(context.Background(), startTimeMs, endTimeMs); err != nil {
+			return
 		}
-		iter := series.Iterator()
-		var ref storage.SeriesRef = 0
-		writer := opt.db.Appender(context.Background())
-		for iter.Next() {
-			count++
-			timeMs, value := iter.At()
-			if ref, err = writer.Append(ref, labels, timeMs, value); err != nil {
+		selecter := querier.Select(false, nil, args.labelMatchers...)
+		for selecter.Next() {
+			series := selecter.At()
+			labels := series.Labels()
+			if len(args.labelAppends) > 0 {
+				labels = append(labels, args.labelAppends...)
+			}
+			iter := series.Iterator()
+			var ref storage.SeriesRef = 0
+			writer := ndb.Appender(context.Background())
+			for iter.Next() {
+				count++
+				timeMs, value := iter.At()
+				if ref, err = writer.Append(ref, labels, timeMs, value); err != nil {
+					return
+				}
+			}
+			writer.Commit()
+			if err = iter.Err(); err != nil {
 				return
 			}
 		}
-		writer.Commit()
-		if err = iter.Err(); err != nil {
+		if err = selecter.Err(); err != nil {
+			return
+		}
+		if warnings := selecter.Warnings(); len(warnings) > 0 {
+			fmt.Println("warnings:", warnings)
+		}
+		if err = querier.Close(); err != nil {
 			return
 		}
 	}
-	if err = selecter.Err(); err != nil {
-		return
-	}
-	if warnings := selecter.Warnings(); len(warnings) > 0 {
-		fmt.Println("warnings:", warnings)
-	}
-	if err = querier.Close(); err != nil {
-		return
-	}
 	fmt.Println(time.UnixMilli(opt.mint).Format(time.RFC3339Nano), "到", time.UnixMilli(opt.maxt).Format(time.RFC3339Nano), "的数据完成，共", count, "条")
+	if count == 0 {
+		ndb.Clean()
+	} else {
+		ndb.Fin()
+	}
 	return
 }
 
@@ -79,7 +88,6 @@ func (c *localCopyer) multiThreadCopyer(wg *sync.WaitGroup, req <-chan *copyOpt,
 	defer wg.Done()
 	for o := range req {
 		c, err := c.copyPerTime(o)
-		o.db.Fin()
 		resp <- &copyResp{c, err}
 	}
 }
