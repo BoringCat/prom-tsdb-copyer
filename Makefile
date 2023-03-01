@@ -4,7 +4,7 @@ MAKEDATE=$(shell date '+%FT%T%:z')
 FILENAME=$(shell head -1 go.mod | awk -F '[/ ]' '{print $$NF}' | cut -d. -f1)
 BIN_FILE=_dist/${FILENAME}
 BUILD_CMD=CGO_ENABLED=0 go build -trimpath -ldflags "-s -w -X main.version=${VERSION} -X main.buildDate=${MAKEDATE} -X main.commit=${COMMIT}"
-MAIN=.
+MAIN=./cmd
 
 .PHONY: deps dist
 dist: deps

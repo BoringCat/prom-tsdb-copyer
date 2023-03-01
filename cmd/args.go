@@ -5,7 +5,6 @@ import (
 	"os"
 	"runtime"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/prometheus/prometheus/model/labels"
@@ -155,20 +154,4 @@ func parseArgs() {
 
 	kingpin.MustParse(app.Parse(os.Args[1:]))
 	noErr(args.ParseArgs())
-}
-
-type copyer interface {
-	copyPerTime(opt *copyOpt) (count uint64, err error)
-	multiThreadCopyer(wg *sync.WaitGroup, req <-chan *copyOpt, resp chan<- *copyResp)
-	getDbTimes() (mint int64, maxt int64, err error)
-	clean() error
-}
-
-type copyOpt struct {
-	mint, maxt int64
-}
-
-type copyResp struct {
-	count uint64
-	err   error
 }

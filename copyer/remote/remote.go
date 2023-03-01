@@ -1,4 +1,4 @@
-package main
+package remote
 
 import (
 	"context"
@@ -8,6 +8,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/boringcat/prom-tsdb-copyer/copyer"
 	"github.com/prometheus/common/config"
 	"github.com/prometheus/common/model"
 	"github.com/prometheus/prometheus/model/labels"
@@ -16,19 +17,31 @@ import (
 	"github.com/prometheus/prometheus/storage/remote"
 )
 
-func MustNewRemoteCopyer(uri, targetDir string) *remoteCopyer {
+func NewRemoteCopyer(uri, targetDir string, labelMatchers []*labels.Matcher) (*remoteCopyer, error) {
 	u, err := url.Parse(uri)
-	noErr(err)
+	if err != nil {
+		return nil, err
+	}
 	c, err := remote.NewReadClient("remote", &remote.ClientConfig{
 		URL:     &config.URL{URL: u},
 		Timeout: model.Duration(time.Hour),
 	})
-	noErr(err)
-	lm := make([]*prompb.LabelMatcher, len(args.labelMatchers))
-	for idx, m := range args.labelMatchers {
+	if err != nil {
+		return nil, err
+	}
+	lm := make([]*prompb.LabelMatcher, len(labelMatchers))
+	for idx, m := range labelMatchers {
 		lm[idx] = &prompb.LabelMatcher{Name: m.Name, Value: m.Value, Type: prompb.LabelMatcher_Type(m.Type)}
 	}
-	return &remoteCopyer{c, lm}
+	return &remoteCopyer{c, lm}, nil
+}
+
+func MustNewRemoteCopyer(uri, targetDir string, labelMatchers []*labels.Matcher) *remoteCopyer {
+	if c, err := NewRemoteCopyer(uri, targetDir, labelMatchers); err != nil {
+		panic(err)
+	} else {
+		return c
+	}
 }
 
 type remoteCopyer struct {
@@ -36,11 +49,14 @@ type remoteCopyer struct {
 	lm []*prompb.LabelMatcher
 }
 
-func (c *remoteCopyer) copyPerTime(opt *copyOpt) (count uint64, err error) {
+func (c *remoteCopyer) CopyPerTime(opt *copyer.CopyOpt) (uid string, samCount, serCount uint64, err error) {
 	var result *prompb.QueryResult
-	ndb := makeNewDB(opt.mint, opt.maxt, args.targetDir)
-	for startTimeMs := opt.mint; startTimeMs < opt.maxt; startTimeMs += args.timeSplit {
-		endTimeMs := int64Min(opt.maxt, startTimeMs+args.timeSplit)
+	ndb, err := copyer.NewDB(opt)
+	if err != nil {
+		return
+	}
+	for r := range opt.Range(opt.TimeSplit) {
+		startTimeMs, endTimeMs := r[0], r[1]
 		result, err = c.c.Read(context.TODO(), &prompb.Query{
 			StartTimestampMs: startTimeMs,
 			EndTimestampMs:   endTimeMs,
@@ -50,18 +66,19 @@ func (c *remoteCopyer) copyPerTime(opt *copyOpt) (count uint64, err error) {
 			return
 		}
 		for _, series := range result.GetTimeseries() {
+			serCount++
 			qlabels := series.GetLabels()
 			lbs := make(labels.Labels, len(qlabels))
 			for idx, ql := range qlabels {
 				lbs[idx] = labels.Label{Name: ql.GetName(), Value: ql.GetValue()}
 			}
-			if len(args.labelAppends) > 0 {
-				lbs = append(lbs, args.labelAppends...)
+			if len(opt.LabelAppends) > 0 {
+				lbs = append(lbs, opt.LabelAppends...)
 			}
 			var ref storage.SeriesRef = 0
 			writer := ndb.Appender(context.Background())
 			for _, sample := range series.GetSamples() {
-				count++
+				samCount++
 				if ref, err = writer.Append(ref, lbs, sample.GetTimestamp(), sample.GetValue()); err != nil {
 					return
 				}
@@ -71,27 +88,27 @@ func (c *remoteCopyer) copyPerTime(opt *copyOpt) (count uint64, err error) {
 			}
 		}
 	}
-	fmt.Println(time.UnixMilli(opt.mint).Format(time.RFC3339Nano), "到", time.UnixMilli(opt.maxt).Format(time.RFC3339Nano), "的数据完成，共", count, "条")
-	if count == 0 {
-		ndb.Clean()
+	mintStr, maxtStr := opt.ShowTime()
+	fmt.Println(mintStr, "到", maxtStr, "的数据完成，有", serCount, "个序列，共", samCount, "条")
+	if samCount == 0 {
+		err = ndb.Clean()
 	} else {
-		ndb.Fin()
+		uid, err = ndb.Fin()
 	}
 	return
 }
 
-func (c *remoteCopyer) multiThreadCopyer(wg *sync.WaitGroup, req <-chan *copyOpt, resp chan<- *copyResp) {
+func (c *remoteCopyer) MultiThreadCopyer(wg *sync.WaitGroup, req <-chan *copyer.CopyOpt, resp chan<- *copyer.CopyResp) {
 	defer wg.Done()
 	for o := range req {
-		c, err := c.copyPerTime(o)
-		resp <- &copyResp{c, err}
+		resp <- copyer.NewCopyResp(c.CopyPerTime(o))
 	}
 }
 
-func (c *remoteCopyer) getDbTimes() (int64, int64, error) {
+func (c *remoteCopyer) GetDbTimes() (int64, int64, error) {
 	return math.MinInt64, math.MaxInt64, nil
 }
 
-func (c *remoteCopyer) clean() error {
+func (c *remoteCopyer) Clean() error {
 	return nil
 }
