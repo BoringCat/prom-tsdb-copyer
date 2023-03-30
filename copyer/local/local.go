@@ -64,19 +64,23 @@ func (c *localCopyer) CopyPerTime(opt *copyer.CopyOpt) (uid string, samCount, se
 		for selecter.Next() {
 			series := selecter.At()
 			labels := series.Labels()
-			uniqSeries[labels.String()] = struct{}{}
 			if len(opt.LabelAppends) > 0 {
 				labels = append(labels, opt.LabelAppends...)
 			}
 			iter := series.Iterator()
 			var ref storage.SeriesRef = 0
+			var hasSample bool
 			writer := ndb.Appender(context.Background())
 			for iter.Next() {
+				hasSample = true
 				samCount++
 				timeMs, value := iter.At()
 				if ref, err = writer.Append(ref, labels, timeMs, value); err != nil {
 					return
 				}
+			}
+			if hasSample {
+				uniqSeries[labels.String()] = struct{}{}
 			}
 			writer.Commit()
 			if err = iter.Err(); err != nil {
