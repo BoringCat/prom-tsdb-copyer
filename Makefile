@@ -3,60 +3,30 @@ COMMIT=$(shell git rev-parse HEAD 2>/dev/null | head -c8)
 MAKEDATE=$(shell date '+%FT%T%:z')
 FILENAME=$(shell head -1 go.mod | awk -F '[/ ]' '{print $$NF}' | cut -d. -f1)
 BIN_FILE=_dist/${FILENAME}
-BUILD_CMD=CGO_ENABLED=0 go build -trimpath -ldflags "-s -w -X main.version=${VERSION} -X main.buildDate=${MAKEDATE} -X main.commit=${COMMIT}"
+BUILD_CMD=go build -trimpath -ldflags "-s -w -X main.version=${VERSION} -X main.buildDate=${MAKEDATE} -X main.commit=${COMMIT}"
 MAIN=./cmd
+export CGO_ENABLED = 0
 
 .PHONY: deps dist
 dist: deps
 	$(BUILD_CMD) -o $(BIN_FILE) $(MAIN)
 
-all: deps linux windows darwin upx
-linux: deps linux-loong64 linux-amd64 linux-armv7 linux-arm64
-windows: deps windows-386 windows-amd64 # windows-arm
-darwin: deps darwin-amd64 darwin-arm64
+DISTLIST=$(shell go tool dist list | grep -E '^(darwin|freebsd|linux|windows)/' | grep -Ev '/(386|mips)$$' | grep -v 'windows/arm' | sed 's~/~.~g')
+PLATFORMS=$(foreach cmd,${DISTLIST},${cmd})
+.PHONY: all
+all: deps $(addprefix dist., $(PLATFORMS))
 
-linux-loong64: deps
-	@echo Building $(BIN_FILE)-linux-loong64...
-	@GOOS=linux GOARCH=loong64 $(BUILD_CMD) -o $(BIN_FILE)-linux-loong64 $(MAIN)
-	@echo Builded $(BIN_FILE)-linux-loong64
-linux-amd64: deps
-	@echo Building $(BIN_FILE)-linux-amd64...
-	@GOOS=linux GOARCH=amd64 $(BUILD_CMD) -o $(BIN_FILE)-linux-amd64 $(MAIN)
-	@echo Builded $(BIN_FILE)-linux-amd64
-linux-armv7: deps
-	@echo Building $(BIN_FILE)-linux-armv7...
-	@GOOS=linux GOARCH=arm $(BUILD_CMD) -o $(BIN_FILE)-linux-armv7 $(MAIN)
-	@echo Builded $(BIN_FILE)-linux-armv7
-linux-arm64: deps
-	@echo Building $(BIN_FILE)-linux-arm64...
-	@GOOS=linux GOARCH=arm64 $(BUILD_CMD) -o $(BIN_FILE)-linux-arm64 $(MAIN)
-	@echo Builded $(BIN_FILE)-linux-arm64
-windows-386: deps
-	@echo Building $(BIN_FILE)-windows-386...
-	@GOOS=windows GOARCH=386 $(BUILD_CMD) -o $(BIN_FILE)-windows-386.exe $(MAIN)
-	@echo Builded $(BIN_FILE)-windows-386
-windows-amd64: deps
-	@echo Building $(BIN_FILE)-windows-amd64...
-	@GOOS=windows GOARCH=amd64 $(BUILD_CMD) -o $(BIN_FILE)-windows-amd64.exe $(MAIN)
-	@echo Builded $(BIN_FILE)-windows-amd64
-# windows-arm: deps
-# 	@echo Building $(BIN_FILE)-windows-arm...
-# 	@GOOS=windows GOARCH=arm $(BUILD_CMD) -o $(BIN_FILE)-windows-arm.exe $(MAIN)
-# 	@echo Builded $(BIN_FILE)-windows-arm
-darwin-amd64: deps
-	@echo Building $(BIN_FILE)-darwin-amd64...
-	@GOOS=darwin GOARCH=amd64 $(BUILD_CMD) -o $(BIN_FILE)-darwin-amd64 $(MAIN)
-	@echo Builded $(BIN_FILE)-darwin-amd64
-darwin-arm64: deps
-	@echo Building $(BIN_FILE)-darwin-arm64...
-	@GOOS=darwin GOARCH=amd64 $(BUILD_CMD) -o $(BIN_FILE)-darwin-arm64 $(MAIN)
-	@echo Builded $(BIN_FILE)-darwin-arm64
+.PHONY: dist.%
+dist.%: deps
+	$(eval GOOS := $(word 1,$(subst ., ,$*)))
+	$(eval GOARCH := $(word 2,$(subst ., ,$*)))
+	@sh -c '[ "$(GOOS)" = "windows" ] && EXT=.exe; export GOOS=$(GOOS) GOARCH=$(GOARCH); set -x; $(BUILD_CMD) -o $(BIN_FILE)-$(GOOS)-$(GOARCH)$${EXT} $(MAIN)'
 
 upx:
-	upx -9 -q $(BIN_FILE)-*
+	upx -9 -q $(BIN_FILE)-* || true
 
 deps:
 	@go mod tidy -v && go mod verify && go mod download
 
 clean:
-	-rm -r dist
+	-rm -r _dist
