@@ -1,14 +1,14 @@
-package main
+package compact
 
 import (
 	"fmt"
-	"os"
 	"runtime"
 	"strings"
 	"time"
 
+	"github.com/boringcat/prom-tsdb-copyer/utils"
 	"github.com/prometheus/prometheus/model/labels"
-	"gopkg.in/alecthomas/kingpin.v2"
+	"github.com/prometheus/prometheus/tsdb"
 )
 
 const (
@@ -29,10 +29,11 @@ type cmdArgs struct {
 	queryTimeSplit time.Duration
 	// TSDB数据分块间隔
 	blockTimeSplit time.Duration
+	// 分组提交指标写入的数量（默认10240）
+	commitCount uint64 // = 10240
 	// 是否验证序列、样本数
 	verifyCount bool
 	// 是否开启乱序写入支持
-	allowOutOfOrder      bool
 	appendThanosMetadata bool
 	// 并发线程数
 	multiThread int
@@ -41,6 +42,11 @@ type cmdArgs struct {
 	// 追加到序列的Label
 	// 注意：不会检查label是否存在
 	appendLabels map[string]string
+
+	// 分租户label，用于区分租户
+	tenantLabel string
+	// 默认租户
+	defaultTenant string
 
 	// 起始时间（毫秒），由 startTimeStr 解析得来
 	startTime int64
@@ -52,7 +58,7 @@ type cmdArgs struct {
 	blockSplit int64 // = 86400000
 	// 查询条件
 	labelMatchers []*labels.Matcher // = []*labels.Matcher{labels.MustNewMatcher(labels.MatchRegexp, "", ".*")}
-	// 追加的Labe，由 appendLabels 解析得来
+	// 追加的Label，由 appendLabels 解析得来
 	labelAppends labels.Labels
 }
 
@@ -78,7 +84,19 @@ func (c *cmdArgs) ParseArgs() (err error) {
 		c.multiThread = runtime.GOMAXPROCS(0)
 	}
 	c.timeSplit = int64(c.queryTimeSplit / time.Millisecond)
+	if c.timeSplit > tsdb.DefaultBlockDuration/2 {
+		c.timeSplit = tsdb.DefaultBlockDuration / 2
+	} else if !utils.Edivisible(tsdb.DefaultBlockDuration, c.timeSplit) {
+		recommend := time.Duration(tsdb.DefaultBlockDuration/(tsdb.DefaultBlockDuration/c.timeSplit)) * time.Millisecond
+		panic(fmt.Errorf("timeSplit 必须能被 tsdb.DefaultBlockDuration 整除，推荐 %s ", recommend))
+	}
 	c.blockSplit = int64(c.blockTimeSplit / time.Millisecond)
+	if c.blockSplit < tsdb.DefaultBlockDuration {
+		c.blockSplit = tsdb.DefaultBlockDuration
+	} else if !utils.Edivisible(c.blockSplit, tsdb.DefaultBlockDuration) {
+		recommend := (time.Duration(c.blockSplit/tsdb.DefaultBlockDuration) + 1) * time.Hour * 2
+		panic(fmt.Errorf("blockSplit 必须能整除 tsdb.DefaultBlockDuration，推荐 %s ", recommend))
+	}
 	if mls := len(c.matchLabels); mls > 0 {
 		fmt.Print("使用查询语句: {")
 		c.labelMatchers = make([]*labels.Matcher, mls)
@@ -90,8 +108,12 @@ func (c *cmdArgs) ParseArgs() (err error) {
 		fmt.Print("}\n")
 	}
 	if len(c.appendLabels) > 0 {
-		c.labelAppends = labels.FromMap(c.appendLabels)
-		fmt.Println("将增加label:", c.labelAppends.String())
+		if args.appendThanosMetadata {
+			fmt.Println("将在Meta中增加label:", c.labelAppends.String())
+		} else {
+			fmt.Println("将增加label:", c.labelAppends.String())
+			c.labelAppends = labels.FromMap(c.appendLabels)
+		}
 	} else if args.appendThanosMetadata {
 		noErr(fmt.Errorf("追加Thanos的元数据时必须添加额外的Label"))
 	}
@@ -135,23 +157,19 @@ var (
 	}
 )
 
-func parseArgs() {
-	app := kingpin.New("prom-tsdb-copyer", "普罗米修斯TSDB复制器")
-	app.HelpFlag.Short('h')
+func ParseArgs(app utils.KingPin) {
 	app.Arg("from", "源TSDB文件夹/Remote Read 地址").Required().StringVar(&args.source)
 	app.Arg("toDir", "目标TSDB文件夹").Required().ExistingDirVar(&args.targetDir)
-	app.Flag("start-time", "数据开始时间").Short('S').Required().StringVar(&args.startTimeStr)
-	app.Flag("end-time", "数据结束时间").Short('E').Required().StringVar(&args.endTimeStr)
-	app.Flag("query-split", "切分查询的时长").Short('Q').Default("1h").DurationVar(&args.queryTimeSplit)
-	app.Flag("block-split", "切分新块的时长").Short('B').Default("24h").DurationVar(&args.blockTimeSplit)
-	app.Flag("verify", "是否验证数据量").BoolVar(&args.verifyCount)
-	app.Flag("allow-out-of-order", "是否允许乱序写入").BoolVar(&args.allowOutOfOrder)
-	app.Flag("thanos-metadata", "是否追加Thanos的元数据").BoolVar(&args.appendThanosMetadata)
-	app.Flag("multi-thread", "并行多少个复制(0=GOMAXPROCS)").Short('T').Default("-1").IntVar(&args.multiThread)
-	app.Flag("label-query", "查询label（k=v）").Short('l').StringsVar(&args.matchLabels)
-	app.Flag("label-append", "增加label（k=v）").Short('L').StringMapVar(&args.appendLabels)
-	app.Version(fmt.Sprintf("版本: %s-%s\n构建日期: %s", version, commit, buildDate)).VersionFlag.Short('V')
-
-	kingpin.MustParse(app.Parse(os.Args[1:]))
-	noErr(args.ParseArgs())
+	app.Flag("start-time", "数据开始时间").Short('S').Envar("COPYER_START_TIME").Required().StringVar(&args.startTimeStr)
+	app.Flag("end-time", "数据结束时间").Short('E').Envar("COPYER_END_TIME").Required().StringVar(&args.endTimeStr)
+	app.Flag("query-split", "切分查询的时长").Short('Q').Envar("COPYER_QUERY_SPLIT").Default("1h").DurationVar(&args.queryTimeSplit)
+	app.Flag("block-split", "切分新块的时长").Short('B').Envar("COPYER_BLOCK_SPLIT").Default("24h").DurationVar(&args.blockTimeSplit)
+	app.Flag("verify", "是否验证数据量").Envar("COPYER_VERIFY").BoolVar(&args.verifyCount)
+	app.Flag("thanos-metadata", "是否追加Thanos的元数据").Envar("COPYER_THANOS_METADATA").BoolVar(&args.appendThanosMetadata)
+	app.Flag("multi-thread", "并行多少个复制(0=GOMAXPROCS)").Envar("COPYER_MULTI_THREAD").Short('T').Default("-1").IntVar(&args.multiThread)
+	app.Flag("label-query", "查询label（k=v）").Short('l').Envar("COPYER_LABEL_QUERY").StringsVar(&args.matchLabels)
+	app.Flag("label-append", "增加label（k=v）").Short('L').Envar("COPYER_LABEL_APPEND").StringMapVar(&args.appendLabels)
+	app.Flag("commit-count", "分组提交指标写入的数量").Envar("COPYER_COMMIT_COUNT").Default("10240").Uint64Var(&args.commitCount)
+	app.Flag("tenant", "分租户用的Label").Envar("COPYER_TENANT_KEY").StringVar(&args.tenantLabel)
+	app.Flag("default-tenant", "默认租户值").Envar("COPYER_DEFAULT_TENANT").StringVar(&args.defaultTenant)
 }

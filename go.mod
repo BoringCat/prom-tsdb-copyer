@@ -3,6 +3,7 @@ module github.com/boringcat/prom-tsdb-copyer
 go 1.19
 
 require (
+	github.com/go-kit/log v0.2.1
 	github.com/prometheus/common v0.37.0
 	github.com/prometheus/prometheus v0.39.1
 	gopkg.in/alecthomas/kingpin.v2 v2.2.6
@@ -18,7 +19,6 @@ require (
 	github.com/davecgh/go-spew v1.1.1 // indirect
 	github.com/dennwc/varint v1.0.0 // indirect
 	github.com/felixge/httpsnoop v1.0.3 // indirect
-	github.com/go-kit/log v0.2.1 // indirect
 	github.com/go-logfmt/logfmt v0.5.1 // indirect
 	github.com/go-logr/logr v1.2.3 // indirect
 	github.com/go-logr/stdr v1.2.2 // indirect
