@@ -28,36 +28,67 @@ type dirMeta struct {
 }
 
 func Compact(dstDir, srcDir string, clean bool, blockSplit int64) ([]string, error) {
-	dirs := []*dirMeta{}
+	dirs := []string{}
 	rdirs, err := os.ReadDir(srcDir)
 	if err != nil {
 		return nil, err
 	}
 	for _, d := range rdirs {
 		dir := path.Join(srcDir, d.Name())
+		if _, err := os.Stat(path.Join(dir, "meta.json")); os.IsNotExist(err) {
+			continue
+		}
+		dirs = append(dirs, path.Join(srcDir, d.Name()))
+	}
+	metas, err := getDirMeta(dirs)
+	if err != nil {
+		return nil, err
+	}
+	return jobsCompact(dstDir, splitJobs(metas, blockSplit), clean)
+}
+
+func CompactByUlids(dstDir, srcDir string, ulids []string, clean bool, blockSplit int64) ([]string, error) {
+	dirs := []string{}
+	for _, ulid := range ulids {
+		dirs = append(dirs, path.Join(srcDir, ulid))
+	}
+	metas, err := getDirMeta(dirs)
+	if err != nil {
+		return nil, err
+	}
+	return jobsCompact(dstDir, splitJobs(metas, blockSplit), clean)
+}
+
+func getDirMeta(dirs []string) (metas []*dirMeta, err error) {
+	metas = []*dirMeta{}
+	for _, dir := range dirs {
 		metaFile := path.Join(dir, "meta.json")
-		fd, err := os.Open(metaFile)
-		if err != nil {
-			logger.Log("level", "info", "msg", err)
+		fd, ferr := os.Open(metaFile)
+		if ferr != nil {
+			logger.Log("level", "info", "msg", ferr)
 			continue
 		}
 		var m tsdb.BlockMeta
-		if err := json.NewDecoder(fd).Decode(&m); err != nil {
-			return nil, err
+		if err = json.NewDecoder(fd).Decode(&m); err != nil {
+			return
 		}
-		dirs = append(dirs, &dirMeta{dir, &m})
+		metas = append(metas, &dirMeta{dir, &m})
 	}
-	sort.Slice(dirs, func(i, j int) bool { return dirs[i].meta.MinTime < dirs[j].meta.MinTime })
+	sort.Slice(metas, func(i, j int) bool { return metas[i].meta.MinTime < metas[j].meta.MinTime })
+	return
+}
+
+func splitJobs(metas []*dirMeta, blockSplit int64) [][]string {
 	jobs := [][]string{}
 	if blockSplit == 0 {
-		jobs = append(jobs, make([]string, len(dirs)))
-		for idx, d := range dirs {
+		jobs = append(jobs, make([]string, len(metas)))
+		for idx, d := range metas {
 			jobs[0][idx] = d.dir
 		}
 	} else {
 		var hourSplited int64 = 0
 		tjobs := []string{}
-		for _, d := range dirs {
+		for _, d := range metas {
 			tjobs = append(tjobs, d.dir)
 			hourSplited += int64(math.Round(float64(d.meta.MaxTime-d.meta.MinTime)/float64(time.Hour.Milliseconds()))) * time.Hour.Milliseconds()
 			if hourSplited >= blockSplit {
@@ -70,15 +101,18 @@ func Compact(dstDir, srcDir string, clean bool, blockSplit int64) ([]string, err
 			jobs = append(jobs, tjobs)
 		}
 	}
-	ulids := []string{}
-	for _, j := range jobs {
-		ulid, err := compact(dstDir, j, clean)
+	return jobs
+}
+
+func jobsCompact(dstDir string, jobs [][]string, clean bool) (ulids []string, err error) {
+	ulids = make([]string, len(jobs))
+	for idx, j := range jobs {
+		ulids[idx], err = compact(dstDir, j, clean)
 		if err != nil {
-			return ulids, err
+			return
 		}
-		ulids = append(ulids, ulid)
 	}
-	return ulids, nil
+	return
 }
 
 func compact(dst string, src []string, clean bool) (string, error) {

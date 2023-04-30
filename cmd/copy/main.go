@@ -11,15 +11,11 @@ import (
 
 	"github.com/boringcat/prom-tsdb-copyer/compacter"
 	"github.com/boringcat/prom-tsdb-copyer/copyer"
-	"github.com/boringcat/prom-tsdb-copyer/copyer/local"
-	"github.com/boringcat/prom-tsdb-copyer/copyer/remote"
 	"github.com/boringcat/prom-tsdb-copyer/utils"
 	"github.com/go-kit/log"
 	"github.com/prometheus/prometheus/tsdb"
-)
 
-var (
-	version, commit, buildDate string
+	"github.com/panjf2000/ants/v2"
 )
 
 type uidChecker []string
@@ -33,92 +29,84 @@ func (c uidChecker) Has(uid string) bool {
 	return false
 }
 
-func compact(dstDir string, tUlids copyer.TenantUlids) (uids map[string]uidChecker) {
+func compactFn(dstDir, tenant string, ulids []string, wg *sync.WaitGroup, m *sync.Map) func() {
+	td := path.Join(dstDir, tenant)
+	return func() {
+		defer wg.Done()
+		cuids, err := compacter.CompactByUlids(td, td, ulids, true, args.blockSplit)
+		noErr(err)
+		m.Store(tenant, cuids)
+	}
+}
+
+func compact(p *ants.Pool, dstDir string, tUlids copyer.TenantResults) (uids map[string]uidChecker) {
 	uids = map[string]uidChecker{}
 	if args.blockSplit == tsdb.DefaultBlockDuration {
 		for k, v := range tUlids.ToMap() {
 			uids[k] = v
 		}
 	} else {
-		for tenant := range tUlids.ToMap() {
-			td := path.Join(dstDir, tenant)
-			cuids, err := compacter.Compact(td, td, true, args.blockSplit)
-			noErr(err)
-			uids[tenant] = cuids
+		var wg sync.WaitGroup
+		var m sync.Map
+		for tenant, ulids := range tUlids.ToMap() {
+			wg.Add(1)
+			p.Submit(compactFn(dstDir, tenant, ulids, &wg, &m))
 		}
+		wg.Wait()
+		m.Range(func(key, value any) bool {
+			uids[key.(string)] = value.([]string)
+			return true
+		})
 	}
 	return
 }
 
-func multiThreadMain(cp copyer.Copyer) (samCount uint64, uids map[string]uidChecker) {
-	var workgroup sync.WaitGroup
-	var recvgroup sync.WaitGroup
-	dbmint, dbmaxt, err := cp.GetDbTimes()
+func poolMain(cp *copyer.Copyer) (samCount uint64, uids map[string]uidChecker) {
+	var wg sync.WaitGroup
+	var rg sync.WaitGroup
+	// Appender Pool
+	wp, err := ants.NewPool(args.writeThread, ants.WithPreAlloc(args.writeThread > 0))
+	noErr(err)
+	// Flush Pool
+	fp, err := ants.NewPool(0)
+	noErr(err)
+	dbmint, dbmaxt := cp.GetDbTimes()
 	noErr(err)
 	qmint := utils.Int64Max(dbmint, args.startTime)
 	qmaxt := utils.Int64Min(dbmaxt, args.endTime)
 	baseOpt := copyer.CopyOpt{
-		Mint: qmint, Maxt: qmaxt,
+		Mint: qmint, Maxt: qmaxt, ManualGC: args.manualGC, JobPool: wp, FlushPool: fp, FlushGroup: &wg,
 		BlockSplit: args.blockSplit, TimeSplit: args.timeSplit, CommitCount: args.commitCount,
-		TargetDir: args.targetDir, LabelAppends: args.labelAppends,
-		LabelMatchers: args.labelMatchers, TenantLabel: args.tenantLabel, DefaultTenant: args.defaultTenant,
-	}
-	req := make(chan *copyer.CopyOpt)
-	resp := make(chan *copyer.CopyResp)
-	workgroup.Add(args.multiThread)
-	for i := 0; i < args.multiThread; i++ {
-		go cp.MultiThreadCopyer(&workgroup, req, resp)
-	}
-	recvgroup.Add(1)
-	tUlids := copyer.TenantUlids{}
-	go func() {
-		for r := range resp {
-			noErr(r.Err)
-			tUlids = append(tUlids, r.Uids...)
-			samCount += r.SamCount
-		}
-		recvgroup.Done()
-	}()
-	for r := range baseOpt.BlockRange(0) {
-		opt := baseOpt.Copy(r[0], r[1])
-		mintStr, maxtStr := opt.ShowTime()
-		req <- opt
-		fmt.Println("发布拷贝", mintStr, "到", maxtStr, "数据的任务")
-	}
-	close(req)
-	workgroup.Wait()
-	close(resp)
-	recvgroup.Wait()
-	uids = compact(baseOpt.TargetDir, tUlids)
-	return
-}
-
-func singleMain(cp copyer.Copyer) (samCount uint64, uids map[string]uidChecker) {
-	dbmint, dbmaxt, err := cp.GetDbTimes()
-	noErr(err)
-	qmint := utils.Int64Max(dbmint, args.startTime)
-	qmaxt := utils.Int64Min(dbmaxt, args.endTime)
-	baseOpt := copyer.CopyOpt{
-		Mint: qmint, Maxt: qmaxt,
-		BlockSplit: args.blockSplit, TimeSplit: args.timeSplit, CommitCount: args.commitCount,
-		TargetDir: args.targetDir, LabelAppends: args.labelAppends,
+		TargetDir: args.targetDir, LabelAppends: args.labelAppends, WriteThread: args.writeThread,
 		LabelMatchers: args.labelMatchers, TenantLabel: args.tenantLabel, DefaultTenant: args.defaultTenant,
 	}
 	mintStr, maxtStr := baseOpt.ShowTime()
 	fmt.Println("开始从", args.source, "拷贝", mintStr, "到", maxtStr, "的数据到", args.targetDir)
-	tUlids := copyer.TenantUlids{}
+
+	ch := make(chan *copyer.TenantResult, args.writeThread)
+	tUlids := copyer.TenantResults{}
+	rg.Add(1)
+	go func() {
+		defer rg.Done()
+		for r := range ch {
+			tUlids = append(tUlids, r)
+			fmt.Println(r.Show())
+			samCount += r.SamCount
+		}
+	}()
 	for r := range baseOpt.BlockRange(0) {
 		opt := baseOpt.Copy(r[0], r[1])
-		uid, sac, err := cp.CopyPerBlock(opt)
-		noErr(err)
-		tUlids = append(tUlids, uid...)
-		samCount += sac
-		if sac == 0 {
-			fmt.Println(mintStr, "到", maxtStr, "共查询到", sac, "条数据")
-			continue
+		noErr(cp.CopyPerBlock(opt, ch))
+		if args.waitEachBlock {
+			wg.Wait()
 		}
 	}
-	uids = compact(baseOpt.TargetDir, tUlids)
+	wg.Wait()
+	close(ch)
+	rg.Wait()
+	fp.Release()
+	uids = compact(wp, baseOpt.TargetDir, tUlids)
+	wp.Release()
 	return
 }
 
@@ -195,19 +183,17 @@ func Main() {
 	noErr(args.ParseArgs())
 	os.Setenv("TMPDIR", args.targetDir)
 	compacter.SetLogger(log.WithPrefix(log.NewLogfmtLogger(log.NewSyncWriter(os.Stdout)), "ts", log.DefaultTimestamp))
-	var origSamCount, newSamCount uint64
-	var uids map[string]uidChecker
-	var cp copyer.Copyer
+	var newSamCount uint64
+	var cp *copyer.Copyer
 	if strings.HasPrefix(args.source, "http://") || strings.HasPrefix(args.source, "https://") {
-		cp = remote.MustNewRemoteCopyer(args.source, args.targetDir, args.labelMatchers)
+		if len(args.tenantLabel) > 0 && (args.labelApi == nil || len(args.labelApi.String()) == 0) {
+			panic("当使用RemoteRead，并且需要区分租户时，LabelApi地址不能为空")
+		}
+		cp = copyer.MustNewCopyer(copyer.NewRemoteCopyer(args.source, args.labelApi))
 	} else {
-		cp = local.MustNewLocalCopyer(args.source)
+		cp = copyer.MustNewCopyer(copyer.NewLocalCopyer(args.source))
 	}
-	if args.multiThread > 0 {
-		origSamCount, uids = multiThreadMain(cp)
-	} else {
-		origSamCount, uids = singleMain(cp)
-	}
+	origSamCount, uids := poolMain(cp)
 	if args.verifyCount {
 		newSamCount = verify(args.targetDir, uids)
 		if origSamCount != newSamCount {

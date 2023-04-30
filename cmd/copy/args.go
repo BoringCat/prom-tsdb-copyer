@@ -2,7 +2,7 @@ package compact
 
 import (
 	"fmt"
-	"runtime"
+	"net/url"
 	"strings"
 	"time"
 
@@ -36,17 +36,24 @@ type cmdArgs struct {
 	// 是否开启乱序写入支持
 	appendThanosMetadata bool
 	// 并发线程数
-	multiThread int
+	writeThread int
 	// 查询语句的label
 	matchLabels []string
 	// 追加到序列的Label
 	// 注意：不会检查label是否存在
 	appendLabels map[string]string
+	// 每个Block写入后执行一次GC
+	manualGC bool
+	// 在每个分块任务发布后等待
+	waitEachBlock bool
 
 	// 分租户label，用于区分租户
 	tenantLabel string
 	// 默认租户
 	defaultTenant string
+
+	// 源是RemoteRead地址时，用于获取Tenant标签值的地址
+	labelApi *url.URL
 
 	// 起始时间（毫秒），由 startTimeStr 解析得来
 	startTime int64
@@ -80,8 +87,8 @@ func (c *cmdArgs) ParseArgs() (err error) {
 	} else {
 		c.endTime = t.UnixMilli()
 	}
-	if c.multiThread == 0 {
-		c.multiThread = runtime.GOMAXPROCS(0)
+	if c.writeThread < 0 {
+		c.writeThread = 1
 	}
 	c.timeSplit = int64(c.queryTimeSplit / time.Millisecond)
 	if c.timeSplit > tsdb.DefaultBlockDuration/2 {
@@ -160,16 +167,19 @@ var (
 func ParseArgs(app utils.KingPin) {
 	app.Arg("from", "源TSDB文件夹/Remote Read 地址").Required().StringVar(&args.source)
 	app.Arg("toDir", "目标TSDB文件夹").Required().ExistingDirVar(&args.targetDir)
+	app.Flag("label-api", "远程Label API地址").Envar("COPYER_LABEL_API").URLVar(&args.labelApi)
 	app.Flag("start-time", "数据开始时间").Short('S').Envar("COPYER_START_TIME").Required().StringVar(&args.startTimeStr)
 	app.Flag("end-time", "数据结束时间").Short('E').Envar("COPYER_END_TIME").Required().StringVar(&args.endTimeStr)
 	app.Flag("query-split", "切分查询的时长").Short('Q').Envar("COPYER_QUERY_SPLIT").Default("1h").DurationVar(&args.queryTimeSplit)
 	app.Flag("block-split", "切分新块的时长").Short('B').Envar("COPYER_BLOCK_SPLIT").Default("24h").DurationVar(&args.blockTimeSplit)
 	app.Flag("verify", "是否验证数据量").Envar("COPYER_VERIFY").BoolVar(&args.verifyCount)
 	app.Flag("thanos-metadata", "是否追加Thanos的元数据").Envar("COPYER_THANOS_METADATA").BoolVar(&args.appendThanosMetadata)
-	app.Flag("multi-thread", "并行多少个复制(0=GOMAXPROCS)").Envar("COPYER_MULTI_THREAD").Short('T').Default("-1").IntVar(&args.multiThread)
+	app.Flag("write-thread", "每个读取并行多少个写入（注意内存使用）(0=不限制)").Envar("COPYER_MULTI_THREAD").Short('T').Default("1").IntVar(&args.writeThread)
 	app.Flag("label-query", "查询label（k=v）").Short('l').Envar("COPYER_LABEL_QUERY").StringsVar(&args.matchLabels)
 	app.Flag("label-append", "增加label（k=v）").Short('L').Envar("COPYER_LABEL_APPEND").StringMapVar(&args.appendLabels)
 	app.Flag("commit-count", "分组提交指标写入的数量").Envar("COPYER_COMMIT_COUNT").Default("10240").Uint64Var(&args.commitCount)
 	app.Flag("tenant", "分租户用的Label").Envar("COPYER_TENANT_KEY").StringVar(&args.tenantLabel)
 	app.Flag("default-tenant", "默认租户值").Envar("COPYER_DEFAULT_TENANT").StringVar(&args.defaultTenant)
+	app.Flag("manual-gc", "Block写入后手动GC（牺牲时间减低内存消耗）").Short('G').Envar("COPYER_MANUAL_GC").BoolVar(&args.manualGC)
+	app.Flag("wait", "在每个分块任务发布后等待").Short('W').Envar("COPYER_WAIT").BoolVar(&args.waitEachBlock)
 }

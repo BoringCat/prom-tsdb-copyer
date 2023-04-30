@@ -7,8 +7,8 @@ BUILD_CMD=go build -trimpath -ldflags "-s -w -X main.version=${VERSION} -X main.
 MAIN=./cmd
 export CGO_ENABLED = 0
 
-.PHONY: deps dist
-dist: deps
+.PHONY: dist
+dist:
 	$(BUILD_CMD) -o $(BIN_FILE) $(MAIN)
 
 DISTLIST=$(shell go tool dist list | grep -E '^(darwin|freebsd|linux|windows)/' | grep -Ev '/(386|mips)$$' | grep -v 'windows/arm' | sed 's~/~.~g')

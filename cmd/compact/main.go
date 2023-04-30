@@ -6,19 +6,13 @@ import (
 
 	"github.com/boringcat/prom-tsdb-copyer/compacter"
 	"github.com/go-kit/log"
+	"github.com/panjf2000/ants/v2"
 )
 
-type compactReq struct {
-	dstDir     string
-	srcDir     string
-	clean      bool
-	blockSplit int64
-}
-
-func worker(wg *sync.WaitGroup, ch <-chan *compactReq) {
-	defer wg.Done()
-	for req := range ch {
-		_, err := compacter.Compact(req.dstDir, req.srcDir, req.clean, req.blockSplit)
+func compactJob(dst, src string, clean bool, blockSplit int64, wg *sync.WaitGroup) func() {
+	return func() {
+		defer wg.Done()
+		_, err := compacter.Compact(dst, src, clean, blockSplit)
 		noErr(err)
 	}
 }
@@ -32,14 +26,10 @@ func Main() {
 			noErr(err)
 		}
 	} else {
-		ch := make(chan *compactReq)
 		var wg sync.WaitGroup
-		for i := 0; i < args.multiThread; i++ {
-			wg.Add(1)
-			go worker(&wg, ch)
-		}
+		wg.Add(len(args.sourceDirs))
 		for _, src := range args.sourceDirs {
-			ch <- &compactReq{src, src, true, args.blockSplit}
+			ants.Submit(compactJob(src, src, true, args.blockSplit, &wg))
 		}
 		wg.Wait()
 	}

@@ -2,7 +2,6 @@ package compact
 
 import (
 	"fmt"
-	"runtime"
 	"time"
 
 	"github.com/boringcat/prom-tsdb-copyer/utils"
@@ -22,9 +21,6 @@ type cmdArgs struct {
 }
 
 func (c *cmdArgs) ParseArgs() (err error) {
-	if c.multiThread == 0 {
-		c.multiThread = runtime.GOMAXPROCS(0)
-	}
 	c.blockSplit = int64(c.blockTimeSplit / time.Millisecond)
 	if c.blockSplit <= 0 {
 	} else if c.blockSplit < tsdb.DefaultBlockDuration {
