@@ -129,7 +129,7 @@ func compact(dst string, src []string, clean bool) (string, error) {
 		}
 		return name, os.Remove(path.Join(dstPath, "tombstones"))
 	}
-	compacter, err := tsdb.NewLeveledCompactor(context.Background(), nil, logger, []int64{0}, chunkenc.NewPool(), nil)
+	compacter, err := tsdb.NewLeveledCompactor(context.Background(), nil, log.With(logger, "dest", dst), []int64{0}, chunkenc.NewPool(), nil)
 	if err != nil {
 		return "", err
 	}

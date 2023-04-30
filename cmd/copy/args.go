@@ -98,7 +98,8 @@ func (c *cmdArgs) ParseArgs() (err error) {
 		panic(fmt.Errorf("timeSplit 必须能被 tsdb.DefaultBlockDuration 整除，推荐 %s ", recommend))
 	}
 	c.blockSplit = int64(c.blockTimeSplit / time.Millisecond)
-	if c.blockSplit < tsdb.DefaultBlockDuration {
+	if c.blockSplit <= 0 {
+	} else if c.blockSplit < tsdb.DefaultBlockDuration {
 		c.blockSplit = tsdb.DefaultBlockDuration
 	} else if !utils.Edivisible(c.blockSplit, tsdb.DefaultBlockDuration) {
 		recommend := (time.Duration(c.blockSplit/tsdb.DefaultBlockDuration) + 1) * time.Hour * 2

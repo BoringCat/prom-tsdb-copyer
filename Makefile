@@ -14,16 +14,26 @@ dist:
 DISTLIST=$(shell go tool dist list | grep -E '^(darwin|freebsd|linux|windows)/' | grep -Ev '/(386|mips)$$' | grep -v 'windows/arm' | sed 's~/~.~g')
 PLATFORMS=$(foreach cmd,${DISTLIST},${cmd})
 .PHONY: all
-all: deps $(addprefix dist., $(PLATFORMS))
+all: $(addprefix dist., $(PLATFORMS))
 
 .PHONY: dist.%
-dist.%: deps
+dist.%:
 	$(eval GOOS := $(word 1,$(subst ., ,$*)))
 	$(eval GOARCH := $(word 2,$(subst ., ,$*)))
 	@sh -c '[ "$(GOOS)" = "windows" ] && EXT=.exe; export GOOS=$(GOOS) GOARCH=$(GOARCH); set -x; $(BUILD_CMD) -o $(BIN_FILE)-$(GOOS)-$(GOARCH)$${EXT} $(MAIN)'
 
+.PHONY: upx
 upx:
-	upx -9 -q $(BIN_FILE)-* || true
+	upx -9q --no-progress $(BIN_FILE)
+
+.PHONY: upxall
+upxall: $(addprefix upx., $(PLATFORMS))
+
+.PHONY: upx.%
+upx.%:
+	$(eval GOOS := $(word 1,$(subst ., ,$*)))
+	$(eval GOARCH := $(word 2,$(subst ., ,$*)))
+	@sh -c '[ "$(GOOS)" = "windows" ] && EXT=.exe; export GOOS=$(GOOS) GOARCH=$(GOARCH); upx -9q --no-progress $(BIN_FILE)-$(GOOS)-$(GOARCH)$${EXT} || true'
 
 deps:
 	@go mod tidy -v && go mod verify && go mod download
