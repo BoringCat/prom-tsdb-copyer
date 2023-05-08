@@ -21,13 +21,17 @@ func NewBlock(dir string, mint, maxt int64) *Block {
 	return &Block{dir: dir, mint: mint, maxt: maxt}
 }
 
+func NewBlockByBlock(pb *tsdb.Block) *Block {
+	return &Block{dir: pb.Dir(), mint: pb.MinTime(), maxt: pb.MaxTime(), pb: pb}
+}
+
 func (b *Block) Close() error { return b.pb.Close() }
 
 func (b *Block) Has(mint, maxt int64) bool {
 	return (mint > b.mint && maxt < b.mint) || (mint < b.maxt && maxt > b.mint) || b.mint >= mint && b.maxt <= maxt
 }
 
-func (b *Block) GetQueryer(mint, maxt int64) (storage.Querier, error) {
+func (b *Block) Querier(_ context.Context, mint, maxt int64) (storage.Querier, error) {
 	var err error
 	if b.pb == nil {
 		if b.pb, err = tsdb.OpenBlock(nil, b.dir, chunkenc.NewPool()); err != nil {
@@ -49,17 +53,17 @@ func (b Blocks) GetBlocks(mint, maxt int64) []*Block {
 	return resp
 }
 
-func (b Blocks) Querier(_ context.Context, mint, maxt int64) (storage.Querier, error) {
+func (b Blocks) Querier(ctx context.Context, mint, maxt int64) (storage.Querier, error) {
 	bs := b.GetBlocks(mint, maxt)
 	switch len(bs) {
 	case 0:
 		return nil, nil
 	case 1:
-		return bs[0].GetQueryer(mint, maxt)
+		return bs[0].Querier(ctx, mint, maxt)
 	}
 	bqs := make([]storage.Querier, len(bs))
 	for idx, block := range bs {
-		if q, err := block.GetQueryer(mint, maxt); err != nil {
+		if q, err := block.Querier(ctx, mint, maxt); err != nil {
 			return nil, err
 		} else {
 			bqs[idx] = q

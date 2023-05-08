@@ -191,7 +191,7 @@ func Main() {
 		}
 		cp = copyer.MustNewCopyer(copyer.NewRemoteCopyer(args.source, args.labelApi))
 	} else {
-		cp = copyer.MustNewCopyer(copyer.NewLocalCopyer(args.source))
+		cp = copyer.MustNewCopyer(copyer.NewLocalCopyer(args.source, args.blockId))
 	}
 	origSamCount, uids := poolMain(cp)
 	if args.verifyCount {

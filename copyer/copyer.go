@@ -21,6 +21,7 @@ import (
 	"github.com/prometheus/prometheus/storage"
 	"github.com/prometheus/prometheus/storage/remote"
 	"github.com/prometheus/prometheus/tsdb"
+	"github.com/prometheus/prometheus/tsdb/chunkenc"
 )
 
 type TenantResult struct {
@@ -134,7 +135,17 @@ type Copyer struct {
 	client storage.Queryable
 }
 
-func NewLocalCopyer(originDir string) (*Copyer, error) {
+func NewLocalCopyer(originDir, blockId string) (*Copyer, error) {
+	if len(blockId) > 0 {
+		pb, err := tsdb.OpenBlock(nil, path.Join(originDir, blockId), chunkenc.NewPool())
+		if err != nil {
+			return nil, errors.Wrap(err, "tsdb.OpenBlock")
+		}
+		return &Copyer{
+			client: local.NewBlockByBlock(pb),
+			logger: log.NewNopLogger(),
+		}, nil
+	}
 	db, err := tsdb.OpenDBReadOnly(originDir, nil)
 	if err != nil {
 		return nil, err

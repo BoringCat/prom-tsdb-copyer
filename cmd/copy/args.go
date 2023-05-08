@@ -21,6 +21,8 @@ type cmdArgs struct {
 	source string
 	// 目标目录
 	targetDir string
+	// 源块ID（只对本地目录生效）
+	blockId string
 	// 查询数据的起始时间 2006-01-02 15:04:05.999Z
 	startTimeStr string
 	// 查询数据的结束时间 格式 2006-01-02 15:04:05.999Z
@@ -168,6 +170,7 @@ var (
 func ParseArgs(app utils.KingPin) {
 	app.Arg("from", "源TSDB文件夹/Remote Read 地址").Required().StringVar(&args.source)
 	app.Arg("toDir", "目标TSDB文件夹").Required().ExistingDirVar(&args.targetDir)
+	app.Flag("block", "源TSDB块ID").Envar("COPYER_TSDB_BLOCK").StringVar(&args.blockId)
 	app.Flag("label-api", "远程Label API地址").Envar("COPYER_LABEL_API").URLVar(&args.labelApi)
 	app.Flag("start-time", "数据开始时间").Short('S').Envar("COPYER_START_TIME").Required().StringVar(&args.startTimeStr)
 	app.Flag("end-time", "数据结束时间").Short('E').Envar("COPYER_END_TIME").Required().StringVar(&args.endTimeStr)
