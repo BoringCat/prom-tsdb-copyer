@@ -34,6 +34,11 @@ var (
 )
 
 func getQueryRange(from, to time.Time, d time.Duration) iter.Seq2[time.Time, time.Time] {
+	if d == 0 {
+		return func(yield func(time.Time, time.Time) bool) {
+			yield(from, to)
+		}
+	}
 	// 按间隔取整时间
 	stepFromTime := time.UnixMilli(d.Milliseconds() * (from.UnixMilli() / d.Milliseconds()))
 	stepToTime := stepFromTime.Add(d).Add(-time.Millisecond)

@@ -27,9 +27,9 @@ Flags:
   -v, --version             Show application version.
       --from=FROM           数据开始时间
       --to=TO               数据结束时间
-  -S, --query-duration=2h   切分查询的时长
+  -S, --query-duration=2h   切分查询的时长（增加这个值会加大内存使用）
   -B, --block-duration=24h  切分新块的时长
-  -T, --write-thread=1      每个读取并行多少个写入（注意内存使用）(0=不限制)
+  -T, --thread=1            每个新块并行多少个查询（内存使用翻倍）(0=不限制)
   -l, --label-query=LABEL-QUERY ...  
                             查询label（k=v）
   -L, --label-append=LABEL-APPEND ...  
@@ -46,18 +46,16 @@ Args:
 ```
 ### 举例
 ```sh
-# 过滤指标拷贝
-prom-tsdb-copyer -l '__name__=up' old_data/ new_data/
 # 拷贝某一天的内容
 prom-tsdb-copyer --from='2023-02-17 00:00:00' --to='2023-02-18 00:00:00' old_data/ new_data/
 # 按查询内容拷贝
-prom-tsdb-copyer copy --from='2023-02-17 00:00:00'  --to='2023-02-18 00:00:00' -l job=nodes -l 'instance=~192\.168\.1\.\d+' -l 'hostname!=foonode' -l '__name__!~go.*' old_data/ new_data/
+prom-tsdb-copyer --from='2023-02-17 00:00:00' --to='2023-02-18 00:00:00' -l job=nodes -l 'instance=~192\.168\.1\.\d+' -l 'hostname!=foonode' -l '__name__!~go.*' old_data/ new_data/
 # 在拷贝的内容里加标签
-prom-tsdb-copyer copy --from='2023-02-17 00:00:00'  --to='2023-02-18 00:00:00' -L create_from=copyer -L storage=persistent old_data/ new_data/
+prom-tsdb-copyer --from='2023-02-17 00:00:00' --to='2023-02-18 00:00:00' -L create_from=copyer -L storage=persistent old_data/ new_data/
 # 并发拷贝
-prom-tsdb-copyer copy --from='2023-02-17 00:00:00'  --to='2023-02-18 00:00:00' -T4 old_data/ new_data/
+prom-tsdb-copyer --from='2023-02-17 00:00:00' --to='2023-02-18 00:00:00' -T4 old_data/ new_data/
 # 按周分块
-prom-tsdb-copyer copy --from='2023-02-17 00:00:00'  --to='2023-02-18 00:00:00' -B 168h old_data/ new_data/
+prom-tsdb-copyer --from='2023-02-17 00:00:00' --to='2023-02-18 00:00:00' -B 168h old_data/ new_data/
 ```
 
 ## 注意事项
