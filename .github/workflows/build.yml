@@ -1,9 +1,8 @@
 name: 发布版本
 
 on:
-  push:
-    tags:
-    - v*
+  release:
+    types: [published]
 
 jobs:
   build-and-push:
@@ -25,7 +24,11 @@ jobs:
       run: go mod download
 
     - name: Build
-      run: make
+      run: |
+        make dep.tidy
+        make dep.verify
+        make dep.download
+        make all
 
     - name: Upload binaries to release
       uses: svenstaro/upload-release-action@v2
