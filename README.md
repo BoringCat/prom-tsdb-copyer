@@ -83,8 +83,33 @@ make
 
 意味着新版本可以使用更多的并发，提升CPU利用率
 
+| 指标                                          | 旧版本  | 新版本            | 新版本(4并发)     |
+| :-------------------------------------------- | :------ | :---------------- | :---------------- |
+| `User time (seconds)`                         | 537.73  | 344.23 (↓35.98%)  | 362.53 (↓32.58%)  |
+| `System time (seconds)`                       | 32.58   | 19.01 (↓41.65%)   | 17.77 (↓45.46%)   |
+| `Percent of CPU this job got`                 | 129%    | 84% (↓34.88%)     | 216% (↑67.44%)    |
+| `Elapsed (wall clock) time (h:mm:ss or m:ss)` | 7:20.58 | 7:07.99 (↓2.86%)  | 2:55.40 (↓60.19%) |
+| `Average shared text size (kbytes)`           | 0       | 0                 | 0                 |
+| `Average unshared data size (kbytes)`         | 0       | 0                 | 0                 |
+| `Average stack size (kbytes)`                 | 0       | 0                 | 0                 |
+| `Average total size (kbytes)`                 | 0       | 0                 | 0                 |
+| `Maximum resident set size (kbytes)`          | 3499336 | 813832 (↓76.74%)  | 3057436 (↓12.63%) |
+| `Average resident set size (kbytes)`          | 0       | 0                 | 0                 |
+| `Major (requiring I/O) page faults`           | 46      | 0                 | 0                 |
+| `Minor (reclaiming a frame) page faults`      | 1818527 | 2241313 (↑23.25%) | 1296268 (↓28.72%) |
+| `Voluntary context switches`                  | 148016  | 134209 (↓9.33%)   | 101190 (↓31.64%)  |
+| `Involuntary context switches`                | 37746   | 38977 (↑3.26%)    | 37186 (↓1.48%)    |
+| `Swaps`                                       | 0       | 0                 | 0                 |
+| `File system inputs`                          | 2602496 | 64 (↓100.00%)     | 288 (↓99.99%)     |
+| `File system outputs`                         | 9757480 | 9741208           | 9689272           |
+| `Socket messages sent`                        | 0       | 0                 | 0                 |
+| `Socket messages received`                    | 0       | 0                 | 0                 |
+| `Signals delivered`                           | 0       | 0                 | 0                 |
+| `Page size (bytes)`                           | 4096    | 4096              | 4096              |
+
+
 <details>
-<summary>旧版本</summary>
+<summary>旧版本执行命令</summary>
 
 注: 使用 commit-count 配置来保证旧版本不会在写入中途进行Commit操作，保证逻辑一致性
 ```sh
@@ -95,64 +120,15 @@ make
 >_test.log 2>&1
 ```
 
-```yaml
-User time (seconds):                         537.73
-System time (seconds):                       32.58
-Percent of CPU this job got:                 129%
-Elapsed (wall clock) time (h:mm:ss or m:ss): 7:20.58
-Average shared text size (kbytes):           0
-Average unshared data size (kbytes):         0
-Average stack size (kbytes):                 0
-Average total size (kbytes):                 0
-Maximum resident set size (kbytes):          3499336
-Average resident set size (kbytes):          0
-Major (requiring I/O) page faults:           46
-Minor (reclaiming a frame) page faults:      1818527
-Voluntary context switches:                  148016
-Involuntary context switches:                37746
-Swaps:                                       0
-File system inputs:                          2602496
-File system outputs:                         9757480
-Socket messages sent:                        0
-Socket messages received:                    0
-Signals delivered:                           0
-Page size (bytes):                           4096
-Exit status:                                 0
-```
-
 </details>
 <details>
-<summary>新版本</summary>
+<summary>新版本执行命令</summary>
 
 ```sh
 /bin/time -v ./_dist/prom-tsdb-copyer ./_old_data/ ./_new_data/ \
   --show-metrics \
   --debug \
 >_test2.log 2>&1
-```
-```yaml
-User time (seconds):                         344.23
-System time (seconds):                       19.01
-Percent of CPU this job got:                 84%
-Elapsed (wall clock) time (h:mm:ss or m:ss): 7:07.99
-Average shared text size (kbytes):           0
-Average unshared data size (kbytes):         0
-Average stack size (kbytes):                 0
-Average total size (kbytes):                 0
-Maximum resident set size (kbytes):          813832
-Average resident set size (kbytes):          0
-Major (requiring I/O) page faults:           0
-Minor (reclaiming a frame) page faults:      2241313
-Voluntary context switches:                  134209
-Involuntary context switches:                38977
-Swaps:                                       0
-File system inputs:                          64
-File system outputs:                         9741208
-Socket messages sent:                        0
-Socket messages received:                    0
-Signals delivered:                           0
-Page size (bytes):                           4096
-Exit status:                                 0
 ```
 
 </details>
