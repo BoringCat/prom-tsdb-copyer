@@ -1,0 +1,38 @@
+name: 发布版本
+
+on:
+  release:
+    types: [published]
+
+jobs:
+  build-and-push:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v5
+
+    - name: Set up Go
+      uses: actions/setup-go@v6
+      with:
+        go-version-file: go.mod
+        check-latest: true
+
+    - name: Get project dependencies
+      run: go mod download
+
+    - name: Build
+      run: |
+        make dep.tidy
+        make dep.verify
+        make dep.download
+        make all
+
+    - name: Upload binaries to release
+      uses: svenstaro/upload-release-action@v2
+      with:
+        repo_token: ${{ secrets.GITHUB_TOKEN }}
+        file: ./_dist/*
+        tag: ${{ github.ref }}
+        file_glob: true

@@ -42,12 +42,11 @@ DISTDIR   ?= _dist
 # 定义最终输出路径
 BIN_FILE  := ${DISTDIR}/${FILENAME}
 # 编译命令
-BUILD_CMD := go build -trimpath -ldflags "-s -w -X main.version=${VERSION} -X main.buildDate=${MAKEDATE} -X main.commit=${COMMIT} -X main.gitBranch=${GIT_BRANCH} -X main.goVersion=${GO_VERSION}"
+BUILD_CMD := go build -buildvcs=false -trimpath -ldflags "-s -w -X main.version=${VERSION} -X main.buildDate=${MAKEDATE} -X main.commit=${COMMIT} -X main.gitBranch=${GIT_BRANCH} -X main.goVersion=${GO_VERSION}"
 # 入口文件或文件夹
 MAIN      := ./
 # 开启CGO
 export CGO_ENABLED := 0
-export NODE_VERSION := 20
 
 # 默认命令：根据编译当前系统当前架构的版本，不添加 系统-架构 后缀
 .PHONY: dist
@@ -89,17 +88,6 @@ dep.%:
 
 # 定义 make deps 为执行依赖检查、校验、下载
 deps: dep.tidy dep.verify dep.download
-
-.PHONY: web.install
-web.install:
-	@bash -l -c 'cd web; nvm exec $(NODE_VERSION) yarn install'
-
-.PHONY: web.build
-web.build:
-	@bash -l -c 'cd web; nvm exec $(NODE_VERSION) yarn build'
-
-.PHONY: web
-web: web.install web.build
 
 # 定义 make clean 为清理目录和编译缓存
 clean:

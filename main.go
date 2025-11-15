@@ -120,13 +120,13 @@ func parseArgs() string {
 	app.Flag("to", "数据结束时间").Envar("COPYER_TO_TIME").StringVar(&args.toTimeStr)
 	app.Flag("query-duration", "切分查询的时长").Short('S').Envar("COPYER_QUERY_DURATION").Default("2h").DurationVar(&args.queryDuration)
 	app.Flag("block-duration", "切分新块的时长").Short('B').Envar("COPYER_BLOCK_DURATION").Default("24h").DurationVar(&args.blockDuration)
-	app.Flag("write-thread", "每个读取并行多少个写入（注意内存使用）(0=不限制)").Envar("COPYER_MULTI_THREAD").Short('T').Default("1").IntVar(&args.writeThread)
+	app.Flag("thread", "每个读取并行多少个写入（注意内存使用）(0=不限制)").Envar("COPYER_THREAD").Short('T').Default("1").IntVar(&args.writeThread)
 	app.Flag("label-query", "查询label（k=v）").Short('l').Envar("COPYER_LABEL_QUERY").StringsVar(&args.matchLabels)
 	app.Flag("label-append", "增加label（k=v）").Short('L').Envar("COPYER_LABEL_APPEND").StringMapVar(&args.appendLabels)
 	app.Flag("gc-pre-series", "写入多少序列后GC").Envar("COPYER_GC_PRE_SERIES").Uint64Var(&args.gcPreSeries)
-	app.Flag("debug", "输出Debug日志到终端").Short('d').BoolVar(&args.logDebug)
-	app.Flag("show-metrics", "输出监控指标到终端").BoolVar(&args.showMetrics)
-	app.Flag("gc-after-flush", "写入完成后手动GC").BoolVar(&args.gcAfterFlush)
+	app.Flag("debug", "输出Debug日志到终端").Short('d').Envar("COPYER_DEBUG").BoolVar(&args.logDebug)
+	app.Flag("show-metrics", "输出监控指标到终端").Envar("COPYER_SHOW_METRICS").BoolVar(&args.showMetrics)
+	app.Flag("gc-after-flush", "写入完成后手动GC").Envar("COPYER_GC_AFTER_FLUSH").BoolVar(&args.gcAfterFlush)
 
 	command := kingpin.MustParse(app.Parse(os.Args[1:]))
 	if args.logDebug {
