@@ -24,6 +24,12 @@ func initCompactor() {
 }
 
 func doCompact(blockIds []ulid.ULID) (ulid.ULID, error) {
+	switch len(blockIds) {
+	case 0:
+		return ulid.Zero, nil
+	case 1:
+		return blockIds[0], nil
+	}
 	dirs := make([]string, len(blockIds))
 	for idx, bid := range blockIds {
 		dirs[idx] = fmt.Sprintf("%s/%v", args.targetDir, bid)
