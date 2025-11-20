@@ -18,9 +18,7 @@ jobs:
       with:
         go-version-file: go.mod
         check-latest: true
-
-    - name: Get project dependencies
-      run: go mod download
+        cache: false
 
     - name: Build
       run: |
