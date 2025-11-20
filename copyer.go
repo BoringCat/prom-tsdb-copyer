@@ -178,17 +178,17 @@ func doOneBlockCopy(ctx context.Context, p Pool, from, to time.Time) ([]ulid.ULI
 		wg.Add(1)
 		go doOneTimeCopy(ctx, &wg, p, from, to, args.queryDuration, ch)
 	}
-	go func() {
-		for bid := range ch {
-			if !bid.IsZero() {
-				bids = append(bids, bid)
-			} else {
-				logger.Warn("获取到空blockId")
-			}
+	go func(wg *sync.WaitGroup, ch chan ulid.ULID) {
+		wg.Wait()
+		close(ch)
+	}(&wg, ch)
+	for bid := range ch {
+		if !bid.IsZero() {
+			bids = append(bids, bid)
+		} else {
+			logger.Warn("获取到空blockId")
 		}
-	}()
-	wg.Wait()
-	close(ch)
+	}
 	return bids, nil
 	// bid, err := doCompact(bids)
 	// if err != nil {
